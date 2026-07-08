@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>記述式・クイズ統合アプリ</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; line-height: 1.6; }
+        .hidden { display: none; }
+        .card { border: 1px solid #ccc; padding: 15px; margin-bottom: 15px; border-radius: 5px; background: #fafafa; position: relative; }
+        input[type="text"], textarea { width: 100%; padding: 8px; box-sizing: border-box; margin-top: 5px; margin-bottom: 5px; }
+        button { padding: 10px 20px; cursor: pointer; margin-top: 10px; margin-right: 5px; border: none; border-radius: 4px; font-weight: bold; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0056b3; }
+        .btn-secondary { background: #28a745; color: white; }
+        .btn-secondary:hover { background: #218838; }
+        .btn-purple { background: #6f42c1; color: white; }
+        .btn-purple:hover { background: #5a32a3; }
+        .btn-danger { background: #dc3545; color: white; padding: 5px 10px; font-size: 0.8rem; margin-top: 5px; }
+        .wrong { color: red; font-weight: bold; }
+        .correct { color: green; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="creator-view">
+        <h2>📝 クイズを作成する</h2>
+        <div class="card">
+            <label><strong>このクイズの名前（タイトル）：</strong></label>
+            <input type="text" id="quiz-title" value="マイ・カスタムクイズ">
+        </div>
+
+        <h3>問題の登録（記述式）</h3>
+        <div id="questions-inputs"></div>
+
+        <button type="button" class="btn-secondary" onclick="addQuestionForm()">➕ 問題を追加する</button>
+        <button type="button" class="btn-primary" onclick="generateLink()">🔗 単体URLを生成する</button>
+
+        <div id="result-url-area" class="hidden" style="margin-top: 20px;">
+            <h3>生成されたクイズURL：</h3>
+            <p>クイズ名: <strong id="created-quiz-name"></strong></p>
+            <input type="text" id="generated-url" readonly onclick="this.select()">
+        </div>
+
+        <hr style="margin: 40px 0;">
+
+        <h2>🔀 複数のクイズURLを1つに統合する</h2>
+        <div class="card">
+            <label><strong>まとめたクイズ集のタイトル：</strong></label>
+            <input type="text" id="pack-title" value="総合クイズパック">
+            
+            <label style="margin-top: 10px; display: block;"><strong>統合したいクイズURL（1行に1つずつ入力）：</strong></label>
+            <textarea id="urls-to-combine" rows="5" placeholder="https://...&#10;https://..."></textarea>
+            
+            <button type="button" class="btn-purple" onclick="combineUrls()">🔗 統合URLを生成する</button>
+        </div>
+
+        <div id="result-pack-area" class="hidden" style="margin-top: 20px;">
+            <h3>生成された統合URL（クイズパック）：</h3>
+            <p>パック名: <strong id="created-pack-name"></strong></p>
+            <input type="text" id="generated-pack-url" readonly onclick="this.select()">
+        </div>
+    </div>
+
+
+    <div id="player-view" class="hidden">
+        <h2 id="player-quiz-title">クイズに挑戦！</h2>
+        
+        <div id="name-step" class="card">
+            <label><strong>あなたの名前を入力してください：</strong></label>
+            <input type="text" id="player-name" placeholder="例：たろう">
+            <button class="btn-primary" onclick="startQuiz()">クイズを始める</button>
+        </div>
+
+        <div id="quiz-step" class="hidden">
+            <p>回答者: <strong id="display-player-name"></strong> さん</p>
+            <hr>
+            <div id="quiz-container"></div>
+            <button class="btn-primary" onclick="judgeQuiz()">採点する</button>
+        </div>
+
+        <div id="result-step" class="hidden card">
+            <h3>採点結果</h3>
+            <p id="score-text"></p>
+            <div id="result-details"></div>
+        </div>
+    </div>
+
+    <script>
+        let globalQuestions = []; // 回答で使用するすべての問題を格納
+        let randomizedQuestions = [];
+        let questionCount = 0;
+        let pageTitle = "クイズに挑戦！";
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const dataParam = urlParams.get('data');
+            const packParam = urlParams.get('pack');
+
+            if (dataParam || packParam) {
+                // 回答画面へ切り替え
+                document.getElementById('creator-view').classList.add('hidden');
+                document.getElementById('player-view').classList.remove('hidden');
+                
+                if (dataParam) {
+                    // 単体URLの場合
+                    loadSingleQuiz(dataParam);
+                } else if (packParam) {
+                    // 統合URLの場合
+                    loadPackQuiz(packParam);
+                }
+            } else {
+                addQuestionForm();
+            }
+        });
+
+        // ーーー 【作成側】フォーム操作 ーーー
+        function addQuestionForm() {
+            questionCount++;
+            const container = document.getElementById('questions-inputs');
+            const formDiv = document.createElement('div');
+            formDiv.className = 'card question-form';
+            formDiv.id = `q-form-${questionCount}`;
+            formDiv.innerHTML = `
+                <label><strong>問題:</strong></label>
+                <input type="text" class="q-text" placeholder="例：日本で一番高い山は？">
+                <label><strong>正解の答え:</strong></label>
+                <input type="text" class="q-ans" placeholder="例：富士山">
+                <button type="button" class="btn-danger" onclick="document.getElementById('q-form-${questionCount}').remove()">この問題を削除</button>
+            `;
+            container.appendChild(formDiv);
+        }
+
+        function generateLink() {
+            const title = document.getElementById('quiz-title').value.trim();
+            const forms = document.querySelectorAll('.question-form');
+            const questions = [];
+
+            forms.forEach(form => {
+                const text = form.querySelector('.q-text').value.trim();
+                const ans = form.querySelector('.q-ans').value.trim();
+                if(text && ans) questions.push({ q: text, a: ans });
+            });
+
+            if (questions.length === 0) return alert("問題を最低1問入力してください");
+
+            const base64Str = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({ title: title, list: questions }))));
+            const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodeURIComponent(base64Str)}`;
+
+            document.getElementById('created-quiz-name').textContent = title;
+            document.getElementById('generated-url').value = shareUrl;
+            document.getElementById('result-url-area').classList.remove('hidden');
+        }
+
+        // ーーー 🌟 新機能：URLの統合処理 🌟 ーーー
+        function combineUrls() {
+            const packTitle = document.getElementById('pack-title').value.trim();
+            const urlsText = document.getElementById('urls-to-combine').value;
+            // 改行で区切ってURLの配列にする
+            const lines = urlsText.split(/\r?\n/);
+            const dataTokens = [];
+
+            lines.forEach(line => {
+                if (!line.trim()) return;
+                try {
+                    const urlObj = new URL(line.trim());
+                    const dataVal = urlObj.searchParams.get('data');
+                    if (dataVal) {
+                        dataTokens.push(dataVal); // dataの中身（Base64部分）だけを抽出
+                    }
+                } catch (e) {
+                    // URL形式ではない行は無視、またはスキップ
+                }
+            });
+
+            if (dataTokens.length === 0) {
+                alert("有効なクイズURLが検出されませんでした。URLに「?data=〜」が含まれているか確認してください。");
+                return;
+            }
+
+            // タイトルと各クイズのトークンをまとめたオブジェクトを作る
+            const packData = { packTitle: packTitle, tokens: dataTokens };
+            const base64PackStr = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(packData))));
+            const sharePackUrl = `${window.location.origin}${window.location.pathname}?pack=${encodeURIComponent(base64PackStr)}`;
+
+            document.getElementById('created-pack-name').textContent = packTitle;
+            document.getElementById('generated-pack-url').value = sharePackUrl;
+            document.getElementById('result-pack-area').classList.remove('hidden');
+        }
+
+        // ーーー 【回答側】データ展開（単体 / 統合） ーーー
+        function decodeData(base64Str) {
+            const binStr = atob(decodeURIComponent(base64Str));
+            const utf8Bytes = Uint8Array.from(binStr, c => c.charCodeAt(0));
+            return JSON.parse(new TextDecoder().decode(utf8Bytes));
+        }
+
+        function loadSingleQuiz(base64Data) {
+            try {
+                const quizData = decodeData(base64Data);
+                pageTitle = `「${quizData.title}」に挑戦！`;
+                document.getElementById('player-quiz-title').textContent = pageTitle;
+                globalQuestions = quizData.list; // 全問題をセット
+            } catch (e) {
+                alert("データの読み込みに失敗しました。");
+            }
+        }
+
+        function loadPackQuiz(base64PackData) {
+            try {
+                const packData = decodeData(base64PackData);
+                pageTitle = `「${packData.packTitle}」に挑戦！`;
+                document.getElementById('player-quiz-title').textContent = pageTitle;
+
+                // 統合されているすべてのクイズURLから問題を1つの配列に合流させる
+                globalQuestions = [];
+                packData.tokens.forEach(token => {
+                    const quizData = decodeData(token);
+                    globalQuestions = globalQuestions.concat(quizData.list);
+                });
+            } catch (e) {
+                alert("統合データの読み込みに失敗しました。");
+            }
+        }
+
+        // ーーー 【回答側】クイズ開始 ーーー
+        function startQuiz() {
+            const name = document.getElementById('player-name').value.trim();
+            if (!name) return alert("名前を入力してください！");
+
+            document.getElementById('display-player-name').textContent = name;
+            document.getElementById('name-step').classList.add('hidden');
+            document.getElementById('quiz-step').classList.remove('hidden');
+
+            // 統合された全問題を一斉にシャッフル
+            randomizedQuestions = [...globalQuestions].sort(() => Math.random() - 0.5);
+
+            const container = document.getElementById('quiz-container');
+            container.innerHTML = "";
+
+            randomizedQuestions.forEach((item, index) => {
+                const qDiv = document.createElement('div');
+                qDiv.className = 'card';
+                qDiv.innerHTML = `
+                    <p><strong>問題 ${index + 1}:</strong> ${item.q}</p>
+                    <input type="text" class="player-answer" placeholder="答えを入力してください">
+                `;
+                container.appendChild(qDiv);
+            });
+        }
+
+        // ーーー 【回答側】採点 ーーー
+        function judgeQuiz() {
+            const answerInputs = document.querySelectorAll('.player-answer');
+            const detailsDiv = document.getElementById('result-details');
+            detailsDiv.innerHTML = "";
+            let correctCount = 0;
+
+            randomizedQuestions.forEach((item, index) => {
+                const playerAns = answerInputs[index].value.trim();
+                const isCorrect = (playerAns === item.a.trim());
+                if (isCorrect) correctCount++;
+
+                const p = document.createElement('p');
+                p.innerHTML = `
+                    <strong>問題 ${index + 1}:</strong> ${item.q}<br>
+                    あなたの回答: ${playerAns} <span class="${isCorrect ? 'correct' : 'wrong'}">${isCorrect ? '⭕ 正解' : '❌ 不正解'}</span><br>
+                    <small style="color:#666">正解: ${item.a}</small>
+                `;
+                detailsDiv.appendChild(p);
+            });
+
+            const playerName = document.getElementById('player-name').value;
+            document.getElementById('score-text').innerHTML = `<strong>${playerName}</strong> さんの結果： ${randomizedQuestions.length}問中 <strong>${correctCount}問</strong> 正解！`;
+
+            document.getElementById('quiz-step').classList.add('hidden');
+            document.getElementById('result-step').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
